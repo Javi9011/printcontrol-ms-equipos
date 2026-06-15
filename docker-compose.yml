@@ -1,0 +1,40 @@
+version: '3.9'
+
+services:
+
+  db-equipos:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ms_equipos_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - pgdata_equipos:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"   # 5433 para no colisionar con otros servicios
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  ms-equipos:
+    build: .
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py runserver 0.0.0.0:8001"
+    volumes:
+      - .:/app
+    ports:
+      - "8001:8001"
+    env_file:
+      - .env
+    environment:
+      DB_HOST: db-equipos
+      DB_PORT: 5432
+    depends_on:
+      db-equipos:
+        condition: service_healthy
+
+volumes:
+  pgdata_equipos:
