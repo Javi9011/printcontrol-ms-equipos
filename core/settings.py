@@ -190,10 +190,15 @@ LOGGING = {
             "class": "logging.StreamHandler",
         },
     },
+    "root": {
+        "handlers": ["console"],
+        "level": "ERROR",
+    },
     "loggers": {
-        "django": {
+        "django.request": {
             "handlers": ["console"],
             "level": "ERROR",
+            "propagate": False,
         },
     },
 }
