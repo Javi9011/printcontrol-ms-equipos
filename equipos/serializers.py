@@ -11,13 +11,13 @@ class TonerSerializer(serializers.ModelSerializer):
     class Meta:
         model = Toner
         fields = [
-            'id', 'canal', 'canal_display',
+            'id','equipo','canal', 'canal_display',
             'capacidad_paginas', 'paginas_restantes',
             'umbral_alerta_pct',
             'porcentaje_restante', 'requiere_cambio', 'nivel',
             'actualizado_en',
         ]
-
+        read_only_fields = ['id', 'actualizado_en']
 
 class CambioTonerSerializer(serializers.ModelSerializer):
     class Meta:
