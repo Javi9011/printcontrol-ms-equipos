@@ -94,6 +94,7 @@ WSGI_APPLICATION = 'core.wsgi.application'
 # ─────────────────────────────────────────────
 
 DATABASE_URL = os.getenv('DATABASE_URL')
+MS_CLIENTES_URL = os.getenv('MS_CLIENTES_URL', '')
 
 if DATABASE_URL:
     DATABASES = {

@@ -1,3 +1,5 @@
+import requests
+from django.conf import settings
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from rest_framework import viewsets, status, filters
@@ -45,6 +47,116 @@ class EquipoViewSet(viewsets.ModelViewSet):
             return EquipoWriteSerializer
         return EquipoListSerializer
 
+    def validar_cliente_contrato(self, cliente_id, contrato_id):
+        """Verifica que el cliente exista y que el contrato le pertenezca y esté activo y vigente."""
+        base_url = settings.MS_CLIENTES_URL.rstrip('/')
+
+        try:
+            cliente_response = requests.get(
+                f'{base_url}/api/v1/clientes/{cliente_id}/',
+                timeout=10
+            )
+
+            if cliente_response.status_code == 404:
+                return False, 'El cliente seleccionado no existe.'
+
+            cliente_response.raise_for_status()
+
+            contrato_response = requests.get(
+                f'{base_url}/api/v1/contratos/{contrato_id}/',
+                timeout=10
+            )
+
+            if contrato_response.status_code == 404:
+                return False, 'El contrato seleccionado no existe.'
+
+            contrato_response.raise_for_status()
+
+            contrato = contrato_response.json()
+
+            if contrato.get('cliente') != cliente_id:
+                return False, 'El contrato no pertenece al cliente seleccionado.'
+
+            if contrato.get('estado') != 'ACTIVO' or not contrato.get('esta_vigente'):
+                return False, 'El contrato debe estar activo y vigente.'
+
+            return True, contrato
+
+        except requests.RequestException:
+            return False, 'No fue posible verificar el cliente y contrato. Intenta nuevamente.'
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        cliente_id = serializer.validated_data.get('cliente_id')
+        contrato_id = serializer.validated_data.get('contrato_id')
+
+        # El equipo debe tener cliente y contrato.
+        if not cliente_id or not contrato_id:
+            return Response(
+                {'detail': 'Debes seleccionar un cliente y un contrato.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Validar cliente y contrato en ms-clientes.
+        valido, resultado = self.validar_cliente_contrato(
+            cliente_id,
+            contrato_id
+        )
+
+        if not valido:
+            return Response(
+                {'detail': resultado},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Crear equipo localmente.
+        equipo = serializer.save()
+
+        # Crear arrendamiento en ms-clientes.
+        base_url = settings.MS_CLIENTES_URL.rstrip('/')
+
+        arrendamiento_data = {
+            'contrato': contrato_id,
+            'equipo_id': equipo.id,
+            'equipo_nombre': equipo.nombre,
+            'equipo_serial': equipo.numero_serie,
+            'estado': 'ACTIVO',
+            'cuota_mensual_ciclos': equipo.cuota_mensual,
+            'ubicacion': equipo.ubicacion or '',
+        }
+
+        try:
+            response = requests.post(
+                f'{base_url}/api/v1/arrendamientos/',
+                json=arrendamiento_data,
+                timeout=15
+            )
+
+            response.raise_for_status()
+
+        except requests.RequestException:
+            # Si falla la sincronización, eliminar el equipo recién creado.
+            equipo.delete()
+
+            return Response(
+                {
+                    'detail': (
+                        'No se pudo registrar el arrendamiento en el '
+                        'microservicio Clientes. El equipo no fue creado.'
+                    )
+                },
+                status=status.HTTP_502_BAD_GATEWAY
+            )
+
+        data = EquipoListSerializer(equipo).data
+        headers = self.get_success_headers(data)
+
+        return Response(
+            data,
+            status=status.HTTP_201_CREATED,
+            headers=headers
+        )
     @extend_schema(
         summary='Resumen / dashboard',
         responses={200: ResumenEquipoSerializer},
