@@ -26,6 +26,7 @@ class CambioTonerSerializer(serializers.ModelSerializer):
         read_only_fields = ['creado_en']
 
 
+
 class LecturaContadorSerializer(serializers.ModelSerializer):
     ciclos_desde_anterior = serializers.ReadOnlyField()
     excede_cuota = serializers.ReadOnlyField()
@@ -40,22 +41,78 @@ class LecturaContadorSerializer(serializers.ModelSerializer):
         read_only_fields = ['creado_en']
 
     def validate(self, data):
-        equipo = data.get('equipo') or self.instance.equipo
-        fecha = data.get('fecha') or self.instance.fecha
-        contador = data.get('contador')
+        equipo = data.get(
+            'equipo',
+            self.instance.equipo if self.instance else None
+        )
+        fecha = data.get(
+            'fecha',
+            self.instance.fecha if self.instance else None
+        )
+        contador = data.get(
+            'contador',
+            self.instance.contador if self.instance else None
+        )
 
-        # El contador nunca puede bajar respecto a la lectura anterior
+        if not equipo or not fecha or contador is None:
+            return data
+
+        # Evitar dos lecturas del mismo equipo en el mismo mes
+        lecturas_mes = LecturaContador.objects.filter(
+            equipo=equipo,
+            fecha__year=fecha.year,
+            fecha__month=fecha.month
+        )
+
+        if self.instance:
+            lecturas_mes = lecturas_mes.exclude(pk=self.instance.pk)
+
+        if lecturas_mes.exists():
+            raise serializers.ValidationError({
+                'fecha': 'Ya existe una lectura para este equipo en ese mes.'
+            })
+
+        # Buscar la lectura inmediatamente anterior
         anterior = (
             LecturaContador.objects
             .filter(equipo=equipo, fecha__lt=fecha)
+            .exclude(pk=self.instance.pk if self.instance else None)
             .order_by('-fecha')
             .first()
         )
-        if anterior and contador is not None and contador < anterior.contador:
-            raise serializers.ValidationError(
-                {'contador': f'El contador no puede ser menor al valor anterior ({anterior.contador:,}).'}
-            )
+
+        # Si es la primera lectura, utilizar el contador inicial
+        contador_anterior = (
+            anterior.contador if anterior else equipo.contador_inicial
+        )
+
+        if contador < contador_anterior:
+            raise serializers.ValidationError({
+                'contador': (
+                    f'El contador no puede ser menor al valor anterior '
+                    f'({contador_anterior:,}).'
+                )
+            })
+
+        # Comprobar que no supere una lectura posterior existente
+        siguiente = (
+            LecturaContador.objects
+            .filter(equipo=equipo, fecha__gt=fecha)
+            .exclude(pk=self.instance.pk if self.instance else None)
+            .order_by('fecha')
+            .first()
+        )
+
+        if siguiente and contador > siguiente.contador:
+            raise serializers.ValidationError({
+                'contador': (
+                    f'El contador no puede superar la siguiente lectura '
+                    f'({siguiente.contador:,}).'
+                )
+            })
+
         return data
+
 
 
 class EquipoListSerializer(serializers.ModelSerializer):
