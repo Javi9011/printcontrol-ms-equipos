@@ -198,10 +198,11 @@ class EquipoViewSet(viewsets.ModelViewSet):
     @transaction.atomic
     def registrar_lectura(self, request, pk=None):
         """
-        Registra la lectura del contador de ciclos y opcionalmente
-        actualiza los niveles de cada tóner. Todo en una sola petición.
+        Registra la lectura del contador general y los contadores
+        independientes por color. También actualiza los niveles de tóner.
         """
         equipo = self.get_object()
+
         serializer = LecturaConToneresSerializer(
             data=request.data,
             context={'equipo': equipo}
@@ -209,11 +210,15 @@ class EquipoViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         vd = serializer.validated_data
 
-        # Crear lectura
+        # Crear lectura con contador general y contadores por color
         lectura = LecturaContador.objects.create(
             equipo=equipo,
             fecha=vd['fecha'],
             contador=vd['contador'],
+            contador_k=vd['contador_k'],
+            contador_c=vd.get('contador_c'),
+            contador_m=vd.get('contador_m'),
+            contador_y=vd.get('contador_y'),
             notas=vd.get('notas', ''),
             registrado_por=vd.get('registrado_por', ''),
         )
@@ -231,6 +236,7 @@ class EquipoViewSet(viewsets.ModelViewSet):
             LecturaContadorSerializer(lectura).data,
             status=status.HTTP_201_CREATED
         )
+        
 
     @extend_schema(summary='Historial de lecturas de un equipo')
     @action(detail=True, methods=['get'], url_path='historial-lecturas')

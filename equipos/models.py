@@ -137,6 +137,29 @@ class LecturaContador(models.Model):
         validators=[MinValueValidator(0)],
         help_text='Valor del contador en ciclos de motor al momento de la lectura'
     )
+    contador_k = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text='Contador acumulado del canal negro'
+    )
+
+    contador_c = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text='Contador acumulado del canal cyan'
+    )
+
+    contador_m = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text='Contador acumulado del canal magenta'
+    )
+
+    contador_y = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text='Contador acumulado del canal amarillo'
+    )
     notas = models.TextField(blank=True)
     registrado_por = models.CharField(max_length=150, blank=True)
 
