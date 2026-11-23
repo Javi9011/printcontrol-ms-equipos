@@ -31,25 +31,21 @@ class LecturaContadorSerializer(serializers.ModelSerializer):
     ciclos_desde_anterior = serializers.ReadOnlyField()
     excede_cuota = serializers.ReadOnlyField()
     ciclos_k_desde_anterior = serializers.SerializerMethodField()
-    ciclos_c_desde_anterior = serializers.SerializerMethodField()
-    ciclos_m_desde_anterior = serializers.SerializerMethodField()
-    ciclos_y_desde_anterior = serializers.SerializerMethodField()
+    ciclos_color_desde_anterior = serializers.SerializerMethodField()
 
     class Meta:
         model = LecturaContador
         fields = [
             'id', 'equipo', 'fecha', 'contador',
-            'contador_k', 'contador_c', 'contador_m', 'contador_y',
+            'contador_k', 'contador_color',
             'ciclos_desde_anterior', 'excede_cuota',
             'ciclos_k_desde_anterior',
-            'ciclos_c_desde_anterior',
-            'ciclos_m_desde_anterior',
-            'ciclos_y_desde_anterior',
+            'ciclos_color_desde_anterior',
             'notas', 'registrado_por', 'creado_en',
         ]
         read_only_fields = ['creado_en']
 
-    def _calcular_ciclos_color(self, obj, campo):
+    def _calcular_ciclos(self, obj, campo):
         anterior = (
             LecturaContador.objects
             .filter(equipo=obj.equipo, fecha__lt=obj.fecha)
@@ -68,21 +64,11 @@ class LecturaContadorSerializer(serializers.ModelSerializer):
 
         return actual - previo
 
-
     def get_ciclos_k_desde_anterior(self, obj):
-        return self._calcular_ciclos_color(obj, 'contador_k')
+        return self._calcular_ciclos(obj, 'contador_k')
 
-
-    def get_ciclos_c_desde_anterior(self, obj):
-        return self._calcular_ciclos_color(obj, 'contador_c')
-
-
-    def get_ciclos_m_desde_anterior(self, obj):
-        return self._calcular_ciclos_color(obj, 'contador_m')
-
-
-    def get_ciclos_y_desde_anterior(self, obj):
-        return self._calcular_ciclos_color(obj, 'contador_y')
+    def get_ciclos_color_desde_anterior(self, obj):
+        return self._calcular_ciclos(obj, 'contador_color')
 
     def validate(self, data):
         equipo = data.get(
@@ -116,16 +102,41 @@ class LecturaContadorSerializer(serializers.ModelSerializer):
                 'fecha': 'Ya existe una lectura para este equipo en ese mes.'
             })
 
-        # Buscar la lectura inmediatamente anterior
+        # Identificar los contadores según el tipo de impresora
+        if equipo.tipo == 'COLOR':
+            contador_k = data.get(
+                'contador_k',
+                self.instance.contador_k if self.instance else None
+            )
+            contador_color = data.get(
+                'contador_color',
+                self.instance.contador_color if self.instance else None
+            )
+
+            if contador_k is None:
+                raise serializers.ValidationError({
+                    'contador_k': 'Debes ingresar el contador negro (K).'
+                })
+
+            if contador_color is None:
+                raise serializers.ValidationError({
+                    'contador_color': 'Debes ingresar el contador de color.'
+                })
+
+        else:
+            # Las impresoras monocromáticas no utilizan estos contadores
+            data['contador_k'] = None
+            data['contador_color'] = None
+
+        # Buscar la lectura anterior
         anterior = (
             LecturaContador.objects
             .filter(equipo=equipo, fecha__lt=fecha)
-            .exclude(pk=self.instance.pk if self.instance else None)
             .order_by('-fecha')
             .first()
         )
 
-        # Si es la primera lectura, utilizar el contador inicial
+        # Validar contador general
         contador_anterior = (
             anterior.contador if anterior else equipo.contador_inicial
         )
@@ -133,16 +144,15 @@ class LecturaContadorSerializer(serializers.ModelSerializer):
         if contador < contador_anterior:
             raise serializers.ValidationError({
                 'contador': (
-                    f'El contador no puede ser menor al valor anterior '
-                    f'({contador_anterior:,}).'
+                    f'El contador general no puede ser menor al valor '
+                    f'anterior ({contador_anterior:,}).'
                 )
             })
 
-        # Comprobar que no supere una lectura posterior existente
+        # Validar que el contador general no supere una lectura posterior
         siguiente = (
             LecturaContador.objects
             .filter(equipo=equipo, fecha__gt=fecha)
-            .exclude(pk=self.instance.pk if self.instance else None)
             .order_by('fecha')
             .first()
         )
@@ -150,14 +160,44 @@ class LecturaContadorSerializer(serializers.ModelSerializer):
         if siguiente and contador > siguiente.contador:
             raise serializers.ValidationError({
                 'contador': (
-                    f'El contador no puede superar la siguiente lectura '
-                    f'({siguiente.contador:,}).'
+                    f'El contador general no puede superar la siguiente '
+                    f'lectura ({siguiente.contador:,}).'
                 )
             })
 
+        # Validar que los contadores K y Color no retrocedan
+        if equipo.tipo == 'COLOR':
+            for campo in ['contador_k', 'contador_color']:
+                valor_actual = data.get(
+                    campo,
+                    getattr(self.instance, campo, None) if self.instance else None
+                )
+
+                if anterior:
+                    valor_anterior = getattr(anterior, campo)
+
+                    if (
+                        valor_actual is not None
+                        and valor_anterior is not None
+                        and valor_actual < valor_anterior
+                    ):
+                        raise serializers.ValidationError({
+                            campo: 'Este contador no puede ser menor a la lectura anterior.'
+                        })
+
+                if siguiente:
+                    valor_siguiente = getattr(siguiente, campo)
+
+                    if (
+                        valor_actual is not None
+                        and valor_siguiente is not None
+                        and valor_actual > valor_siguiente
+                    ):
+                        raise serializers.ValidationError({
+                            campo: 'Este contador no puede superar la siguiente lectura.'
+                        })
+
         return data
-
-
 
 class EquipoListSerializer(serializers.ModelSerializer):
     """Serializer ligero para listados."""
@@ -221,35 +261,41 @@ class ActualizarTonerSerializer(serializers.Serializer):
 
 class LecturaConToneresSerializer(serializers.Serializer):
     """
-    Endpoint combinado: registra la lectura del contador y opcionalmente
-    actualiza los niveles de tóner en una sola llamada.
+    Registra el contador general y, para impresoras a color,
+    los contadores independientes de negro y color.
     """
     fecha = serializers.DateField()
     contador = serializers.IntegerField(min_value=0)
 
     contador_k = serializers.IntegerField(
         min_value=0,
-        required=True
-    )
-    contador_c = serializers.IntegerField(
-        min_value=0,
         required=False,
         allow_null=True
     )
-    contador_m = serializers.IntegerField(
-        min_value=0,
-        required=False,
-        allow_null=True
-    )
-    contador_y = serializers.IntegerField(
+
+    contador_color = serializers.IntegerField(
         min_value=0,
         required=False,
         allow_null=True
     )
 
-    notas = serializers.CharField(required=False, allow_blank=True, default='')
-    registrado_por = serializers.CharField(required=False, allow_blank=True, default='')
-    toners = ActualizarTonerSerializer(many=True, required=False, default=list)
+    notas = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default=''
+    )
+
+    registrado_por = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default=''
+    )
+
+    toners = ActualizarTonerSerializer(
+        many=True,
+        required=False,
+        default=list
+    )
 
     def validate(self, data):
         equipo = self.context.get('equipo')
@@ -257,31 +303,39 @@ class LecturaConToneresSerializer(serializers.Serializer):
         if not equipo:
             return data
 
-        # Validar canales según el tipo de impresora
+        # Validar contadores según el tipo de impresora
         if equipo.tipo == TipoEquipo.COLOR:
-            for campo in ['contador_c', 'contador_m', 'contador_y']:
+            for campo, etiqueta in [
+                ('contador_k', 'negro (K)'),
+                ('contador_color', 'color')
+            ]:
                 if data.get(campo) is None:
                     raise serializers.ValidationError({
-                        campo: 'Este contador es obligatorio para impresoras a color.'
+                        campo: f'Debes ingresar el contador de {etiqueta}.'
                     })
         else:
-            for campo in ['contador_c', 'contador_m', 'contador_y']:
-                if data.get(campo) is not None:
-                    raise serializers.ValidationError({
-                        campo: 'Este contador no aplica para impresoras monocromáticas.'
-                    })
+            # Las monocromáticas solamente utilizan el contador general
+            data['contador_k'] = None
+            data['contador_color'] = None
 
-        # Validar que ningún contador disminuya respecto a la lectura anterior
+        # Buscar la lectura anterior
         anterior = equipo.lecturas.order_by('-fecha').first()
 
         if anterior:
-            for campo in ['contador', 'contador_k', 'contador_c', 'contador_m', 'contador_y']:
+            for campo in ['contador', 'contador_k', 'contador_color']:
                 actual = data.get(campo)
                 previo = getattr(anterior, campo)
 
-                if actual is not None and previo is not None and actual < previo:
+                if (
+                    actual is not None
+                    and previo is not None
+                    and actual < previo
+                ):
                     raise serializers.ValidationError({
-                        campo: f'No puede ser menor al valor anterior ({previo:,}).'
+                        campo: (
+                            f'No puede ser menor al valor anterior '
+                            f'({previo:,}).'
+                        )
                     })
 
         return data

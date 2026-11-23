@@ -215,10 +215,8 @@ class EquipoViewSet(viewsets.ModelViewSet):
             equipo=equipo,
             fecha=vd['fecha'],
             contador=vd['contador'],
-            contador_k=vd['contador_k'],
-            contador_c=vd.get('contador_c'),
-            contador_m=vd.get('contador_m'),
-            contador_y=vd.get('contador_y'),
+            contador_k=vd.get('contador_k'),
+            contador_color=vd.get('contador_color'),
             notas=vd.get('notas', ''),
             registrado_por=vd.get('registrado_por', ''),
         )

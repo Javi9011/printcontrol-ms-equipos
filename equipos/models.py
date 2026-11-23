@@ -140,25 +140,13 @@ class LecturaContador(models.Model):
     contador_k = models.PositiveIntegerField(
         null=True,
         blank=True,
-        help_text='Contador acumulado del canal negro'
+        help_text='Contador acumulado de impresiones en negro'
     )
 
-    contador_c = models.PositiveIntegerField(
+    contador_color = models.PositiveIntegerField(
         null=True,
         blank=True,
-        help_text='Contador acumulado del canal cyan'
-    )
-
-    contador_m = models.PositiveIntegerField(
-        null=True,
-        blank=True,
-        help_text='Contador acumulado del canal magenta'
-    )
-
-    contador_y = models.PositiveIntegerField(
-        null=True,
-        blank=True,
-        help_text='Contador acumulado del canal amarillo'
+        help_text='Contador acumulado de impresiones a color'
     )
     notas = models.TextField(blank=True)
     registrado_por = models.CharField(max_length=150, blank=True)
